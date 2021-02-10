@@ -58,7 +58,7 @@ namespace ResourceProxy
         private static string PROXY_REFERER = "http://localhost/proxy/proxy.ashx";
         private static string DEFAULT_OAUTH = "https://www.arcgis.com/sharing/oauth2/";
         private static int CLEAN_RATEMAP_AFTER = 10000; //clean the rateMap every xxxx requests
-        private static System.Net.IWebProxy SYSTEM_PROXY = System.Net.HttpWebRequest.DefaultWebProxy; // Use the default system proxy
+        private static IWebProxy SYSTEM_PROXY = HttpWebRequest.DefaultWebProxy; // Use the default system proxy
         private static LogTraceListener logTraceListener = null;
         private static Object _rateMapLock = new Object();
 
@@ -76,7 +76,7 @@ namespace ResourceProxy
             {
                 string errorMsg = "This proxy does not support empty parameters.";
                 log(TraceLevel.Error, errorMsg);
-                await sendErrorResponseAsync(context.Response, null, errorMsg, System.Net.HttpStatusCode.BadRequest);
+                await sendErrorResponseAsync(context.Response, null, errorMsg, HttpStatusCode.BadRequest);
                 return;
             }
 
@@ -123,7 +123,7 @@ namespace ResourceProxy
                     //if no serverUrl found, send error message and get out.
                     string errorMsg = "The request URL does not match with the ServerUrl in proxy.config! Please check the proxy.config!";
                     log(TraceLevel.Error, errorMsg);
-                    await sendErrorResponseAsync(context.Response, null, errorMsg, System.Net.HttpStatusCode.BadRequest);
+                    await sendErrorResponseAsync(context.Response, null, errorMsg, HttpStatusCode.BadRequest);
                     return;
                 }
             }
@@ -133,7 +133,7 @@ namespace ResourceProxy
 
                 string errorMsg = ex.InnerException.Message + " " + uri;
                 log(TraceLevel.Error, errorMsg);
-                await sendErrorResponseAsync(context.Response, null, errorMsg, System.Net.HttpStatusCode.InternalServerError);
+                await sendErrorResponseAsync(context.Response, null, errorMsg, HttpStatusCode.InternalServerError);
                 return;
             }
             //if mustMatch was set to true and URL wasn't in the list
@@ -141,7 +141,7 @@ namespace ResourceProxy
             {
                 string errorMsg = ex.Message + " " + uri;
                 log(TraceLevel.Error, errorMsg);
-                await sendErrorResponseAsync(context.Response, null, errorMsg, System.Net.HttpStatusCode.Forbidden);
+                await sendErrorResponseAsync(context.Response, null, errorMsg, HttpStatusCode.Forbidden);
                 return;
             }
             //use actual request header instead of a placeholder, if present
@@ -163,14 +163,14 @@ namespace ResourceProxy
                 catch (Exception)
                 {
                     log(TraceLevel.Warning, "Proxy is being used from an invalid referer: " + context.Request.Headers["referer"]);
-                    await sendErrorResponseAsync(context.Response, "Error verifying referer. ", "403 - Forbidden: Access is denied.", System.Net.HttpStatusCode.Forbidden);
+                    await sendErrorResponseAsync(context.Response, "Error verifying referer. ", "403 - Forbidden: Access is denied.", HttpStatusCode.Forbidden);
                     return;
                 }
 
                 if (!checkReferer(allowedReferersArray, requestReferer))
                 {
                     log(TraceLevel.Warning, "Proxy is being used from an unknown referer: " + context.Request.Headers["referer"]);
-                    await sendErrorResponseAsync(context.Response, "Unsupported referer. ", "403 - Forbidden: Access is denied.", System.Net.HttpStatusCode.Forbidden);
+                    await sendErrorResponseAsync(context.Response, "Unsupported referer. ", "403 - Forbidden: Access is denied.", HttpStatusCode.Forbidden);
                 }
 
 
@@ -180,7 +180,7 @@ namespace ResourceProxy
             if (context.Request.Headers["referer"] == null && allowedReferersArray != null && !allowedReferersArray[0].Equals("*"))
             {
                 log(TraceLevel.Warning, "Proxy is being called by a null referer.  Access denied.");
-                await sendErrorResponseAsync(response, "Current proxy configuration settings do not allow requests which do not include a referer header.", "403 - Forbidden: Access is denied.", System.Net.HttpStatusCode.Forbidden);
+                await sendErrorResponseAsync(response, "Current proxy configuration settings do not allow requests which do not include a referer header.", "403 - Forbidden: Access is denied.", HttpStatusCode.Forbidden);
                 return;
             }
 
@@ -206,7 +206,7 @@ namespace ResourceProxy
                     if (!rate.click())
                     {
                         log(TraceLevel.Warning, " Pair " + key + " is throttled to " + serverUrl.RateLimit + " requests per " + serverUrl.RateLimitPeriod + " minute(s). Come back later.");
-                        sendErrorResponse(context.Response, "This is a metered resource, number of requests have exceeded the rate limit interval.", "Unable to proxy request for requested resource", (System.Net.HttpStatusCode)429);
+                        sendErrorResponse(context.Response, "This is a metered resource, number of requests have exceeded the rate limit interval.", "Unable to proxy request for requested resource", (HttpStatusCode)429);
                         return;
                     }
 
@@ -226,7 +226,7 @@ namespace ResourceProxy
             byte[] postBody = await readRequestPostBodyAsync(context);
             string post = System.Text.Encoding.UTF8.GetString(postBody);
 
-            System.Net.NetworkCredential credentials = null;
+            NetworkCredential credentials = null;
             string requestUri = uri;
             bool hasClientToken = false;
             string token = string.Empty;
@@ -242,7 +242,7 @@ namespace ResourceProxy
             }
             else if (serverUrl.Domain != null)
             {
-                credentials = new System.Net.NetworkCredential(serverUrl.Username, serverUrl.Password, serverUrl.Domain);
+                credentials = new NetworkCredential(serverUrl.Username, serverUrl.Password, serverUrl.Domain);
             }
             else
             {
@@ -281,12 +281,12 @@ namespace ResourceProxy
             }
 
             //forwarding original request
-            System.Net.WebResponse serverResponse = null;
+            WebResponse serverResponse = null;
             try
             {
-                serverResponse = forwardToServer(context.Request, addTokenToUri(requestUri, token, tokenParamName), postBody, credentials);
+                serverResponse = await forwardToServerAsync(context.Request, addTokenToUri(requestUri, token, tokenParamName), postBody, credentials);
             }
-            catch (System.Net.WebException webExc)
+            catch (WebException webExc)
             {
 
                 string errorMsg = webExc.Message + " " + uri;
@@ -294,7 +294,7 @@ namespace ResourceProxy
 
                 if (webExc.Response != null)
                 {
-                    copyResponseHeaders(webExc.Response as System.Net.HttpWebResponse, context.Response);
+                    copyResponseHeaders(webExc.Response as HttpWebResponse, context.Response);
 
                     using (Stream responseStream = webExc.Response.GetResponseStream())
                     {
@@ -303,22 +303,22 @@ namespace ResourceProxy
 
                         while ((bytesRead = responseStream.Read(bytes, 0, bytes.Length)) > 0)
                         {
-                            responseStream.Write(bytes, 0, bytesRead);
+                            await responseStream.WriteAsync(bytes, 0, bytesRead);
                         }
 
-                        context.Response.StatusCode = (int)(webExc.Response as System.Net.HttpWebResponse).StatusCode;
+                        context.Response.StatusCode = (int)(webExc.Response as HttpWebResponse).StatusCode;
                         // ********************
                         // Github issue # 488 - Code to ensure 304 responses do not contain a body
                         // ********************
                         if (context.Response.StatusCode != 304)
                         {
-                            context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+                            await context.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
                         }
                     }
                 }
                 else
                 {
-                    System.Net.HttpStatusCode statusCode = System.Net.HttpStatusCode.InternalServerError;
+                    HttpStatusCode statusCode = HttpStatusCode.InternalServerError;
                     await sendErrorResponseAsync(context.Response, null, errorMsg, statusCode);
                 }
                 return;
@@ -326,14 +326,14 @@ namespace ResourceProxy
 
             if (string.IsNullOrEmpty(token) || hasClientToken)
                 //if token is not required or provided by the client, just fetch the response as is:
-                fetchAndPassBackToClient(serverResponse, response, true);
+                await fetchAndPassBackToClientAsync(serverResponse, response, true);
             else
             {
                 //credentials for secured service have come from configuration file:
                 //it means that the proxy is responsible for making sure they were properly applied:
 
                 //first attempt to send the request:
-                bool tokenRequired = fetchAndPassBackToClient(serverResponse, response, false);
+                bool tokenRequired = await fetchAndPassBackToClientAsync(serverResponse, response, false);
 
 
                 //checking if previously used token has expired and needs to be renewed
@@ -343,14 +343,14 @@ namespace ResourceProxy
                     //server returned error - potential cause: token has expired.
                     //we'll do second attempt to call the server with renewed token:
                     token = await getNewTokenIfCredentialsAreSpecifiedAsync(serverUrl, requestUri);
-                    serverResponse = forwardToServer(context.Request, addTokenToUri(requestUri, token, tokenParamName), postBody);
+                    serverResponse = await forwardToServerAsync(context.Request, addTokenToUri(requestUri, token, tokenParamName), postBody);
 
                     //storing the token in Application scope, to do not waste time on requesting new one untill it expires or the app is restarted.
                     context.Application.Lock();
                     context.Application["token_for_" + serverUrl.Url] = token;
                     context.Application.UnLock();
 
-                    fetchAndPassBackToClient(serverResponse, response, true);
+                    await fetchAndPassBackToClientAsync(serverResponse, response, true);
                 }
             }
 
@@ -385,25 +385,25 @@ namespace ResourceProxy
             return new byte[0];
         }
 
-        private void writeRequestPostBody(System.Net.HttpWebRequest req, byte[] bytes)
+        private async Task writeRequestPostBodyAsync(HttpWebRequest req, byte[] bytes)
         {
             if (bytes != null && bytes.Length > 0)
             {
                 req.ContentLength = bytes.Length;
-                using (Stream outputStream = req.GetRequestStream())
+                using (Stream outputStream = await req.GetRequestStreamAsync())
                 {
-                    outputStream.Write(bytes, 0, bytes.Length);
+                    await outputStream.WriteAsync(bytes, 0, bytes.Length);
                 }
             }
         }
 
-        private System.Net.WebResponse forwardToServer(HttpRequest req, string uri, byte[] postBody, System.Net.NetworkCredential credentials = null)
+        private async Task<WebResponse> forwardToServerAsync(HttpRequest req, string uri, byte[] postBody, NetworkCredential credentials = null)
         {
             string method = postBody.Length > 0 ? "POST" : req.HttpMethod;
-            System.Net.HttpWebRequest forwardReq = createHTTPRequest(uri, method, req.ContentType, credentials);
+            HttpWebRequest forwardReq = createHTTPRequest(uri, method, req.ContentType, credentials);
             copyRequestHeaders(req, forwardReq);
-            writeRequestPostBody(forwardReq, postBody);
-            return forwardReq.GetResponse();
+            await writeRequestPostBodyAsync(forwardReq, postBody);
+            return await forwardReq.GetResponseAsync();
         }
 
         /// <summary>
@@ -411,7 +411,7 @@ namespace ResourceProxy
         /// </summary>
         /// <param name="fromResponse">The response that we are copying the headers from</param>
         /// <param name="toResponse">The response that we are copying the headers to</param>
-        private void copyResponseHeaders(System.Net.WebResponse fromResponse, HttpResponse toResponse)
+        private void copyResponseHeaders(WebResponse fromResponse, HttpResponse toResponse)
         {
             foreach (var headerKey in fromResponse.Headers.AllKeys)
             {
@@ -444,7 +444,7 @@ namespace ResourceProxy
             }
         }
 
-        private void copyRequestHeaders(HttpRequest fromRequest, System.Net.HttpWebRequest toRequest)
+        private void copyRequestHeaders(HttpRequest fromRequest, HttpWebRequest toRequest)
         {
             foreach (var headerKey in fromRequest.Headers.AllKeys)
             {
@@ -475,9 +475,9 @@ namespace ResourceProxy
                         break;
                     default:
                         // Some headers are restricted and would throw an exception:
-                        // http://msdn.microsoft.com/en-us/library/system.net.httpwebrequest.headers(v=vs.100).aspx
+                        // http://msdn.microsoft.com/en-us/library/httpwebrequest.headers(v=vs.100).aspx
                         // Also check for our custom list of headers that should not be sent (https://github.com/Esri/resource-proxy/issues/362)
-                        if (!System.Net.WebHeaderCollection.IsRestricted(headerKey) &&
+                        if (!WebHeaderCollection.IsRestricted(headerKey) &&
                             headerKeyLower != "accept-encoding" &&
                             headerKeyLower != "proxy-connection" &&
                             headerKeyLower != "connection" &&
@@ -495,7 +495,7 @@ namespace ResourceProxy
             }
         }
 
-        private void setRangeHeader(System.Net.HttpWebRequest req, string range)
+        private void setRangeHeader(HttpWebRequest req, string range)
         {
             string[] specifierAndRange = range.Split('=');
             if (specifierAndRange.Length == 2)
@@ -511,7 +511,7 @@ namespace ResourceProxy
             }
         }
 
-        private bool fetchAndPassBackToClient(System.Net.WebResponse serverResponse, HttpResponse clientResponse, bool ignoreAuthenticationErrors)
+        private async Task<bool> fetchAndPassBackToClientAsync(WebResponse serverResponse, HttpResponse clientResponse, bool ignoreAuthenticationErrors)
         {
             if (serverResponse != null)
             {
@@ -549,7 +549,7 @@ namespace ResourceProxy
                         int read;
                         while ((read = byteStream.Read(buffer, 0, buffer.Length)) > 0)
                         {
-                            clientResponse.OutputStream.Write(buffer, 0, read);
+                            await clientResponse.OutputStream.WriteAsync(buffer, 0, read);
                         }
                         clientResponse.OutputStream.Close();
                     }
@@ -559,7 +559,7 @@ namespace ResourceProxy
             return false;
         }
 
-        private System.Net.WebResponse doHTTPRequest(string uri, string method, System.Net.NetworkCredential credentials = null)
+        private async Task<WebResponse> doHTTPRequestAsync(string uri, string method, NetworkCredential credentials = null)
         {
             byte[] bytes = null;
             String contentType = null;
@@ -578,16 +578,16 @@ namespace ResourceProxy
                 }
             }
 
-            System.Net.HttpWebRequest req = createHTTPRequest(uri, method, contentType, credentials);
+            HttpWebRequest req = createHTTPRequest(uri, method, contentType, credentials);
             req.Referer = PROXY_REFERER;
-            writeRequestPostBody(req, bytes);
-            return req.GetResponse();
+            await writeRequestPostBodyAsync(req, bytes);
+            return await req.GetResponseAsync();
         }
 
-        private System.Net.HttpWebRequest createHTTPRequest(string uri, string method, string contentType, System.Net.NetworkCredential credentials = null)
+        private HttpWebRequest createHTTPRequest(string uri, string method, string contentType, NetworkCredential credentials = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-            System.Net.HttpWebRequest req = (System.Net.HttpWebRequest)System.Net.HttpWebRequest.Create(uri);
+            HttpWebRequest req = (HttpWebRequest)HttpWebRequest.Create(uri);
             req.ServicePoint.Expect100Continue = false;
             req.Method = method;
             if (method == "POST")
@@ -602,7 +602,7 @@ namespace ResourceProxy
             return req;
         }
 
-        private async Task<string> webResponseToStringAsync(System.Net.WebResponse serverResponse)
+        private async Task<string> webResponseToStringAsync(WebResponse serverResponse)
         {
             using (Stream byteStream = serverResponse.GetResponseStream())
             {
@@ -633,7 +633,7 @@ namespace ResourceProxy
                         su.OAuth2Endpoint += "/";
                     log(TraceLevel.Info, "Service is secured by " + su.OAuth2Endpoint + ": getting new token...");
                     string uri = su.OAuth2Endpoint + "token?client_id=" + su.ClientId + "&client_secret=" + su.ClientSecret + "&grant_type=client_credentials&f=json";
-                    string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "POST"));
+                    string tokenResponse = await webResponseToStringAsync(await doHTTPRequestAsync(uri, "POST"));
                     token = extractToken(tokenResponse, "token");
                     if (!string.IsNullOrEmpty(token))
                         token = await exchangePortalTokenForServerTokenAsync(token, su);
@@ -645,7 +645,7 @@ namespace ResourceProxy
                     //if a request is already being made to generate a token, just let it go
                     if (reqUrl.ToLower().Contains("/generatetoken"))
                     {
-                        string tokenResponse = await webResponseToStringAsync(doHTTPRequest(reqUrl, "POST"));
+                        string tokenResponse = await webResponseToStringAsync(await doHTTPRequestAsync(reqUrl, "POST"));
                         token = extractToken(tokenResponse, "token");
                         return token;
                     }
@@ -668,7 +668,7 @@ namespace ResourceProxy
                         log(TraceLevel.Info, " Querying security endpoint...");
                         infoUrl += "/rest/info?f=json";
                         //lets send a request to try and determine the URL of a token generator
-                        string infoResponse = await webResponseToStringAsync(doHTTPRequest(infoUrl, "GET"));
+                        string infoResponse = await webResponseToStringAsync(await doHTTPRequestAsync(infoUrl, "GET"));
                         String tokenServiceUri = getJsonValue(infoResponse, "tokenServicesUrl");
                         if (string.IsNullOrEmpty(tokenServiceUri))
                         {
@@ -682,7 +682,7 @@ namespace ResourceProxy
                         {
                             log(TraceLevel.Info, " Service is secured by " + tokenServiceUri + ": getting new token...");
                             string uri = tokenServiceUri + "?f=json&request=getToken&referer=" + PROXY_REFERER + "&expiration=60&username=" + su.Username + "&password=" + su.Password;
-                            string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "POST"));
+                            string tokenResponse = await webResponseToStringAsync(await doHTTPRequestAsync(uri, "POST"));
                             token = extractToken(tokenResponse, "token");
                         }
                     }
@@ -840,7 +840,7 @@ namespace ResourceProxy
             log(TraceLevel.Info, " Exchanging Portal token for Server-specific token for " + su.Url + "...");
             string uri = su.OAuth2Endpoint.Substring(0, su.OAuth2Endpoint.IndexOf("/oauth2/", StringComparison.OrdinalIgnoreCase)) +
                  "/generateToken?token=" + portalToken + "&serverURL=" + su.Url + "&f=json";
-            string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "GET"));
+            string tokenResponse = await webResponseToStringAsync(await doHTTPRequestAsync(uri, "GET"));
             return extractToken(tokenResponse, "token");
         }
 
@@ -859,7 +859,7 @@ namespace ResourceProxy
             await response.FlushAsync();
         }
 
-        private static void buildErrorResponse(HttpResponse response, String errorDetails, String errorMessage, System.Net.HttpStatusCode errorCode)
+        private static void buildErrorResponse(HttpResponse response, String errorDetails, String errorMessage, HttpStatusCode errorCode)
         {
             String message = string.Format("{{\"error\": {{\"code\": {0},\"message\":\"{1}\"", (int)errorCode, errorMessage);
             if (!string.IsNullOrEmpty(errorDetails))
@@ -877,13 +877,13 @@ namespace ResourceProxy
         }
 
         // Only exists because you cannot use async inside a lock
-        private static void sendErrorResponse(HttpResponse response, String errorDetails, String errorMessage, System.Net.HttpStatusCode errorCode)
+        private static void sendErrorResponse(HttpResponse response, String errorDetails, String errorMessage, HttpStatusCode errorCode)
         {
             buildErrorResponse(response, errorDetails, errorMessage, errorCode);
             response.Flush();
         }
 
-        private static async Task sendErrorResponseAsync(HttpResponse response, String errorDetails, String errorMessage, System.Net.HttpStatusCode errorCode)
+        private static async Task sendErrorResponseAsync(HttpResponse response, String errorDetails, String errorMessage, HttpStatusCode errorCode)
         {
             buildErrorResponse(response, errorDetails, errorMessage, errorCode);
             await response.FlushAsync();
