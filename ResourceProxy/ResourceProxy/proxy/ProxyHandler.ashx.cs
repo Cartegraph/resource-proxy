@@ -888,24 +888,6 @@ namespace ResourceProxy
             await response.FlushAsync();
         }
 
-        private static string getClientIp(HttpRequest request)
-        {
-            if (request == null)
-                return null;
-            string remoteAddr = request.ServerVariables["HTTP_X_FORWARDED_FOR"];
-            if (string.IsNullOrWhiteSpace(remoteAddr))
-            {
-                remoteAddr = request.ServerVariables["REMOTE_ADDR"];
-            }
-            else
-            {
-                // the HTTP_X_FORWARDED_FOR may contain an array of IP, this can happen if you connect through a proxy.
-                string[] ipRange = remoteAddr.Split(',');
-                remoteAddr = ipRange[ipRange.Length - 1];
-            }
-            return remoteAddr;
-        }
-
         private string addTokenToUri(string uri, string token, string tokenParamName)
         {
             if (!String.IsNullOrEmpty(token))
@@ -970,7 +952,7 @@ namespace ResourceProxy
 
         /**
         * Static
-*/
+        */
         private static ProxyConfig getConfig()
         {
             ProxyConfig config = ProxyConfig.GetCurrentConfig();
