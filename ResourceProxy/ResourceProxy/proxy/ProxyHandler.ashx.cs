@@ -223,7 +223,7 @@ namespace ResourceProxy
             }
 
             //readying body (if any) of POST request
-            byte[] postBody = readRequestPostBody(context);
+            byte[] postBody = await readRequestPostBodyAsync(context);
             string post = System.Text.Encoding.UTF8.GetString(postBody);
 
             System.Net.NetworkCredential credentials = null;
@@ -261,7 +261,7 @@ namespace ResourceProxy
                     {
                         token = serverUrl.AccessToken;
                         if (String.IsNullOrEmpty(token))
-                            token = getNewTokenIfCredentialsAreSpecified(serverUrl, requestUri);
+                            token = await getNewTokenIfCredentialsAreSpecifiedAsync(serverUrl, requestUri);
                     }
 
                     if (!String.IsNullOrEmpty(token) && !tokenIsInApplicationScope)
@@ -342,7 +342,7 @@ namespace ResourceProxy
                     log(TraceLevel.Info, "Renewing token and trying again.");
                     //server returned error - potential cause: token has expired.
                     //we'll do second attempt to call the server with renewed token:
-                    token = getNewTokenIfCredentialsAreSpecified(serverUrl, requestUri);
+                    token = await getNewTokenIfCredentialsAreSpecifiedAsync(serverUrl, requestUri);
                     serverResponse = forwardToServer(context.Request, addTokenToUri(requestUri, token, tokenParamName), postBody);
 
                     //storing the token in Application scope, to do not waste time on requesting new one untill it expires or the app is restarted.
@@ -374,12 +374,12 @@ namespace ResourceProxy
         /**
         * Private
 */
-        private byte[] readRequestPostBody(HttpContext context)
+        private async Task<byte[]> readRequestPostBodyAsync(HttpContext context)
         {
             if (context.Request.InputStream.Length > 0)
             {
                 byte[] bytes = new byte[context.Request.InputStream.Length];
-                context.Request.InputStream.Read(bytes, 0, (int)context.Request.InputStream.Length);
+                await context.Request.InputStream.ReadAsync(bytes, 0, (int)context.Request.InputStream.Length);
                 return bytes;
             }
             return new byte[0];
@@ -602,19 +602,19 @@ namespace ResourceProxy
             return req;
         }
 
-        private string webResponseToString(System.Net.WebResponse serverResponse)
+        private async Task<string> webResponseToStringAsync(System.Net.WebResponse serverResponse)
         {
             using (Stream byteStream = serverResponse.GetResponseStream())
             {
                 using (StreamReader sr = new StreamReader(byteStream))
                 {
-                    string strResponse = sr.ReadToEnd();
+                    string strResponse = await sr.ReadToEndAsync();
                     return strResponse;
                 }
             }
         }
 
-        private string getNewTokenIfCredentialsAreSpecified(ServerUrl su, string reqUrl)
+        private async Task<string> getNewTokenIfCredentialsAreSpecifiedAsync(ServerUrl su, string reqUrl)
         {
             string token = "";
             string infoUrl = "";
@@ -633,10 +633,10 @@ namespace ResourceProxy
                         su.OAuth2Endpoint += "/";
                     log(TraceLevel.Info, "Service is secured by " + su.OAuth2Endpoint + ": getting new token...");
                     string uri = su.OAuth2Endpoint + "token?client_id=" + su.ClientId + "&client_secret=" + su.ClientSecret + "&grant_type=client_credentials&f=json";
-                    string tokenResponse = webResponseToString(doHTTPRequest(uri, "POST"));
+                    string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "POST"));
                     token = extractToken(tokenResponse, "token");
                     if (!string.IsNullOrEmpty(token))
-                        token = exchangePortalTokenForServerToken(token, su);
+                        token = await exchangePortalTokenForServerTokenAsync(token, su);
                 }
                 else
                 {
@@ -645,7 +645,7 @@ namespace ResourceProxy
                     //if a request is already being made to generate a token, just let it go
                     if (reqUrl.ToLower().Contains("/generatetoken"))
                     {
-                        string tokenResponse = webResponseToString(doHTTPRequest(reqUrl, "POST"));
+                        string tokenResponse = await webResponseToStringAsync(doHTTPRequest(reqUrl, "POST"));
                         token = extractToken(tokenResponse, "token");
                         return token;
                     }
@@ -668,7 +668,7 @@ namespace ResourceProxy
                         log(TraceLevel.Info, " Querying security endpoint...");
                         infoUrl += "/rest/info?f=json";
                         //lets send a request to try and determine the URL of a token generator
-                        string infoResponse = webResponseToString(doHTTPRequest(infoUrl, "GET"));
+                        string infoResponse = await webResponseToStringAsync(doHTTPRequest(infoUrl, "GET"));
                         String tokenServiceUri = getJsonValue(infoResponse, "tokenServicesUrl");
                         if (string.IsNullOrEmpty(tokenServiceUri))
                         {
@@ -682,7 +682,7 @@ namespace ResourceProxy
                         {
                             log(TraceLevel.Info, " Service is secured by " + tokenServiceUri + ": getting new token...");
                             string uri = tokenServiceUri + "?f=json&request=getToken&referer=" + PROXY_REFERER + "&expiration=60&username=" + su.Username + "&password=" + su.Password;
-                            string tokenResponse = webResponseToString(doHTTPRequest(uri, "POST"));
+                            string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "POST"));
                             token = extractToken(tokenResponse, "token");
                         }
                     }
@@ -834,13 +834,13 @@ namespace ResourceProxy
             return true;//when allowedReferer is null, then allow everything
         }
 
-        private string exchangePortalTokenForServerToken(string portalToken, ServerUrl su)
+        private async Task<string> exchangePortalTokenForServerTokenAsync(string portalToken, ServerUrl su)
         {
             //ideally, we should POST the token request
             log(TraceLevel.Info, " Exchanging Portal token for Server-specific token for " + su.Url + "...");
             string uri = su.OAuth2Endpoint.Substring(0, su.OAuth2Endpoint.IndexOf("/oauth2/", StringComparison.OrdinalIgnoreCase)) +
                  "/generateToken?token=" + portalToken + "&serverURL=" + su.Url + "&f=json";
-            string tokenResponse = webResponseToString(doHTTPRequest(uri, "GET"));
+            string tokenResponse = await webResponseToStringAsync(doHTTPRequest(uri, "GET"));
             return extractToken(tokenResponse, "token");
         }
 
@@ -876,6 +876,7 @@ namespace ResourceProxy
             response.Write(message);
         }
 
+        // Only exists because you cannot use async inside a lock
         private static void sendErrorResponse(HttpResponse response, String errorDetails, String errorMessage, System.Net.HttpStatusCode errorCode)
         {
             buildErrorResponse(response, errorDetails, errorMessage, errorCode);
